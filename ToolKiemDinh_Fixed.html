@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GPT OCR Kiểm Định Thiết Bị</title>
+    <meta charset="utf-8">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+</head>
+<body>
+    <h2>📎 Upload PDF kiểm định:</h2>
+    <input type="file" id="pdfFile" accept=".pdf"><br><br>
+
+    <label>🔑 Nhập API Key khác (nếu muốn override):</label><br>
+    <input type="password" id="apiKey" size="80"><br><br>
+
+    <input type="hidden" id="webhook" value="https://script.google.com/macros/s/AKfycbw7I3-J3KBi5dX2p8oeqAequm0h_TpDaQLyNzBGjMn/exec">
+
+    <button onclick="processPDF()">📤 Xử lý & Trích xuất JSON</button><br><br>
+    <textarea id="output" rows="20" cols="100" placeholder="JSON kết quả sẽ hiển thị tại đây..."></textarea><br><br>
+    <button onclick="sendJSON()">🚀 Gửi lên Bảng tính Cloud</button>
+
+    <script>
+    const defaultKey = "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";
+
+    async function processPDF() {
+        const fileInput = document.getElementById("pdfFile");
+        const apiKeyInput = document.getElementById("apiKey");
+        const output = document.getElementById("output");
+        const key = apiKeyInput.value.trim() || defaultKey;
+
+        if (!fileInput.files.length) {
+            alert("Vui lòng chọn file PDF.");
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const fileReader = new FileReader();
+        fileReader.onload = async function() {
+            const typedarray = new Uint8Array(this.result);
+            const pdf = await pdfjsLib.getDocument({data: typedarray}).promise;
+
+            let fullText = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                const pageText = content.items.map(item => item.str).join(" ");
+                fullText += pageText + "\n";
+            }
+
+            const prompt = `Dưới đây là nội dung của văn bản kiểm định thiết bị. Hãy đọc thật kỹ và chỉ trích xuất JSON nếu thấy đủ thông tin trong nội dung. Nếu không thấy một trường nào thì để trống hoặc ghi là Không đọc được thông tin. Có thể suy đoán ở mức tương đối thông tin đọc được trong tài liệu. NhaCungCap chỉ lấy nếu dòng chứa ít nhất 2 trong số: “Công ty”, “Kiểm định”, “Chất lượng”, “dịch vụ”, “tư vấn” , TNHH, TM ... Ưu tiên dòng in hoa rõ ràng ở đầu văn bản. Không chọn dòng ngẫu nhiên. Nếu không chắc chắn, để null . Tiếp tục chú ý phần Tên thiết bị thì nó thường tương đương với Tên Đối tượng hoặc Đối tượng được kiểm định trong văn bản, nếu nghi ngờ nó là Tiếng Việt có dấu thì tự thêm dấu vào để thành từ có nghĩa. \n\n${fullText}\n\nTrích xuất dưới định dạng JSON gồm các trường: TenThietBi, MaSerial, NgayBatDau, ThoiHanThang, NgayHetHan, NhaCungCap.`;
+
+            const payload = {
+                model: "gpt-4o",
+                messages: [
+                    { role: "system", content: "Bạn là một trợ lý OCR thông minh, chỉ trích xuất dữ liệu thực tế từ tài liệu PDF kiểm định." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.2
+            };
+
+            try {
+                const res = await fetch("https://api.openai.com/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + key
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await res.json();
+                if (result.choices && result.choices[0].message) {
+                    output.value = result.choices[0].message.content;
+                } else {
+                    output.value = "❌ Lỗi từ GPT:\n" + JSON.stringify(result, null, 2);
+                }
+            } catch (e) {
+                output.value = "❌ Lỗi khi gọi API:\n" + e;
+            }
+        };
+        fileReader.readAsArrayBuffer(file);
+    }
+
+    async function sendJSON() {
+        const webhook = document.getElementById("webhook").value.trim();
+        const data = document.getElementById("output").value;
+
+        if (!webhook || !data) {
+            alert("Thiếu Webhook hoặc dữ liệu JSON.");
+            return;
+        }
+
+        try {
+            const res = await fetch(webhook, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: data
+            });
+
+            if (res.ok) {
+                alert("✅ Gửi JSON thành công!");
+            } else {
+                alert("❌ Gửi thất bại. Mã lỗi: " + res.status);
+            }
+        } catch (e) {
+            alert("❌ Lỗi khi gửi: " + e);
+        }
+    }
+    </script>
+</body>
+</html>
